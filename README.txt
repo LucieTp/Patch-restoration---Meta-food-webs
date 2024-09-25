@@ -1,4 +1,4 @@
-Script to run the restoration experiment on meta food webs
+# Script to run the restoration experiment on meta food webs
 
 To replicate the analysis, you will first need to clone the conda environment or make sure to have the right version of python and all modules as described in the main text and conda_environment.txt file.
 
