@@ -8,6 +8,11 @@ Script for running analysis of restoration experiment on meta food webs
 """
 
 
+# initial population dynamics = population dynamics before restoration
+# control files = simulated invasion in a stabilised by not restored landscae (to check that no invasion could happen in that scenario)
+# restored files = populations dynamics after restoration
+
+
 
 #%% Loading modules and global variables
 
@@ -30,6 +35,8 @@ import os
 import seaborn as sb
 
 import pickle
+
+import networkx as nx
 
 os.chdir('D:/TheseSwansea/SFT/Script')
 import FunctionsAnalysisRestorationDonut as fn
@@ -76,7 +83,7 @@ radius_max = 0.1
 #     plt.legend(bbox_to_anchor = [1,1.1])
 #     plt.ylim(0,0.4)
 #     plt.xlim(0,0.4)
-#     plt.savefig(f'D:/TheseSwansea/SFT/Figures/seed{seed_index}-Landscape.png', dpi = 400, 
+#     plt.savefig(f'D:/TheseSwansea/SFT/Figures/seed{seed_index}-Landscape.png', dpi = 1000, 
 #                 bbox_inches = 'tight')
 
 
@@ -173,7 +180,210 @@ ax2.set_ylabel('')
 ax2.set_xlabel('')
 ax2.legend().remove()
 
-plt.savefig('D:/TheseSwansea/SFT/Figures/Map-ClusteredVsScattered.png', dpi = 400, bbox_inches = 'tight')
+plt.savefig('D:/TheseSwansea/SFT/Figures/Map-ClusteredVsScattered.png', dpi = 1000, bbox_inches = 'tight')
+
+
+
+
+# %%% Network map + food webs 
+dist = fn.get_distance(map_landscape[map_landscape['restoration_type'] == 'clustered'][['x','y']])
+
+graph_15P_recolonised = np.zeros((15,15))
+graph_15P_recolonised[patch_to_invade,:] = dist[patch_to_invade,:]
+graph_15P_recolonised[graph_15P_recolonised > 0.2] = 0
+G_recolonised = nx.DiGraph(graph_15P_recolonised)
+
+graph_15P = dist.copy()
+graph_15P[graph_15P > 0.2] = 0
+G = nx.DiGraph(graph_15P)
+
+
+f = 'D:/TheseSwansea/Patch-Models/outputs/15Patches/Homogeneous/seed3/narrow/InitialPopDynamics_seed5_narrow_homogeneous_sim13_15Patches_Stot100_C10_t1000000000000r.pkl'
+sol = pd.read_pickle(f)  
+FW = sol['FW']['M']
+solT = sol['t'] ## time
+solY = sol['y'] ## biomasses
+
+# mean biomass across the last 5% of the time steps
+thresh_high = solT[-1] # get higher time step boundary (tfinal)
+thresh_low = (solT[-1] - (solT[-1] - solT[1])*0.05) # get lower time step boundary (tfinal - 5% * tfinal)
+
+## index of those time steps between low and high boundaries
+index_bf = np.where((solT >= thresh_low) & (solT < thresh_high))[0]
+## biomasses over those 10% time steps
+Bf1 = np.mean(solY[index_bf], axis = 0).reshape(15,100)
+Bf1[Bf1 < 1e-8] = 0 # set biomasses of extinct species to zero
+
+FW = FW[Bf1.sum(axis = 0)>0,:][:, Bf1.sum(axis = 0)>0]
+G_FW = nx.DiGraph(FW)
+pos = {}
+for node in G_FW.nodes():
+    trophic_level = sol['FW']['TL'][Bf1.sum(axis = 0)>0][node]  # Default TL to 1 if not in dict
+    pos[node] = (np.random.rand(), trophic_level)  # Random x-position, y by TL
+
+plt.figure(figsize=(10, 8))
+nx.draw(G_FW, pos, with_labels=False, node_size=100, node_color='black', 
+        arrows=True, edge_color='gray', font_size=10)
+
+
+## create map of shortest path distance
+fig, ([ax1, ax2]) = plt.subplots(nrows=1, ncols=2, figsize=(10,5))
+
+
+landscape = map_landscape[map_landscape['restoration_type'] == 'clustered']
+coordinates = np.column_stack((landscape['x'], landscape['y']))
+positions = dict(zip(G, coordinates))
+node_colors = ['green' if x  else 'grey' for x in landscape['restored']]
+
+nx.draw(G, positions, ax = ax1, node_size=150, cmap = sb.color_palette("coolwarm_r", as_cmap=True),
+        with_labels = True, node_color=node_colors)
+nx.draw(G_recolonised, positions, ax = ax1, node_size=150, cmap = sb.color_palette("coolwarm_r", as_cmap=True),
+        with_labels = True,  edge_color='red', node_color=node_colors)
+ax1.annotate('', xy=coords_patch_to_invade, xytext=(0,0.35),
+             arrowprops=dict(facecolor='black', shrink=0.01))
+ax1.set_title('Clustered')
+limits=ax1.axis('on') # turns on axis
+ax1.tick_params(left=True, bottom=True, labelleft=True, labelbottom=True)
+
+axins = ax1.inset_axes([0.7, 0.6, 0.3, 0.4])
+axins.patch.set_alpha(0.3)  # Set inset plot background to transparent
+
+nx.draw(G_FW, pos, with_labels=False, node_size=10, node_color='black', 
+        arrows=True, edge_color='gray', font_size=10, ax = axins, width=0.5, )
+
+landscape = map_landscape[(map_landscape['restoration_type'] == 'scattered') & 
+                                    (map_landscape['restoration_seed'] == 1)]
+coordinates = np.column_stack((landscape['x'], landscape['y']))
+positions = dict(zip(G, coordinates))
+node_colors = ['green' if x  else 'grey' for x in landscape['restored']]
+
+nx.draw(G, positions, ax = ax2, node_size=150, cmap = sb.color_palette("coolwarm_r", as_cmap=True),
+        with_labels = True, node_color=node_colors)
+nx.draw(G_recolonised, positions, ax = ax2, node_size=150, cmap = sb.color_palette("coolwarm_r", as_cmap=True),
+        with_labels = True,  edge_color='red', node_color=node_colors)
+ax2.annotate('', xy=coords_patch_to_invade, xytext=(0,0.35),
+             arrowprops=dict(facecolor='black', shrink=0.01))
+ax2.set_title('Scattered')
+limits=ax2.axis('on') # turns on axis
+ax2.tick_params(left=True, bottom=True, labelleft=True, labelbottom=True)
+
+axins = ax2.inset_axes([0.7, 0.6, 0.3, 0.4])
+axins.patch.set_alpha(0.3)  # Set inset plot background to transparent
+
+nx.draw(G_FW, pos, with_labels=False, node_size=10, node_color='black', 
+        arrows=True, edge_color='gray', font_size=10, ax = axins, width=0.5)
+
+plt.savefig('D:/TheseSwansea/SFT/Figures/Network-ClusteredVsScattered.pdf', dpi = 1000, bbox_inches = 'tight')
+
+plt.savefig('D:/TheseSwansea/SFT/Figures/Network-ClusteredVsScattered.png', dpi = 1000, bbox_inches = 'tight')
+
+
+# %%% Map in order of restoration + food webs 
+
+map_landscape = restoration_characteristics[restoration_characteristics['landscape_seed'] == 3]
+
+dist = fn.get_distance(map_landscape[map_landscape['restoration_type'] == 'clustered'][['x','y']])
+
+graph_15P_recolonised = np.zeros((15,15))
+graph_15P_recolonised[patch_to_invade,:] = dist[patch_to_invade,:]
+graph_15P_recolonised[graph_15P_recolonised > 0.2] = 0
+G_recolonised = nx.DiGraph(graph_15P_recolonised)
+
+graph_15P = dist.copy()
+graph_15P[graph_15P > 0.2] = 0
+G = nx.DiGraph(graph_15P)
+
+
+f = 'D:/TheseSwansea/Patch-Models/outputs/15Patches/Homogeneous/seed3/narrow/InitialPopDynamics_seed5_narrow_homogeneous_sim13_15Patches_Stot100_C10_t1000000000000r.pkl'
+sol = pd.read_pickle(f)  
+FW = sol['FW']['M']
+solT = sol['t'] ## time
+solY = sol['y'] ## biomasses
+
+# mean biomass across the last 5% of the time steps
+thresh_high = solT[-1] # get higher time step boundary (tfinal)
+thresh_low = (solT[-1] - (solT[-1] - solT[1])*0.05) # get lower time step boundary (tfinal - 5% * tfinal)
+
+## index of those time steps between low and high boundaries
+index_bf = np.where((solT >= thresh_low) & (solT < thresh_high))[0]
+## biomasses over those 10% time steps
+Bf1 = np.mean(solY[index_bf], axis = 0).reshape(15,100)
+Bf1[Bf1 < 1e-8] = 0 # set biomasses of extinct species to zero
+
+FW = FW[Bf1.sum(axis = 0)>0,:][:, Bf1.sum(axis = 0)>0]
+G_FW = nx.DiGraph(FW)
+pos = {}
+for node in G_FW.nodes():
+    trophic_level = sol['FW']['TL'][Bf1.sum(axis = 0)>0][node]  # Default TL to 1 if not in dict
+    pos[node] = (np.random.rand(), trophic_level)  # Random x-position, y by TL
+
+plt.figure(figsize=(10, 8))
+nx.draw(G_FW, pos, with_labels=False, node_size=100, node_color='black', 
+        arrows=True, edge_color='gray', font_size=10)
+
+
+## create map of landscape with panel for each restoration step
+fig, ([ax1, ax2]) = plt.subplots(nrows=1, ncols=2, figsize=(10,5))
+
+
+landscape = map_landscape[map_landscape['restoration_type'] == 'clustered']
+coordinates = np.column_stack((landscape['x'], landscape['y']))
+positions = dict(zip(G, coordinates))
+
+
+restoration = np.repeat(False, 15)
+patches_to_restore = landscape['restored']
+patch_to_improve = [] ## initialise list of patches to improve
+
+for patch in patches_to_restore:
+    
+    # start with one patch, then add the 4 others one by one
+    patch_to_improve = patch_to_improve + [patch]
+            
+    node_colors = np.repeat('grey', 15)
+    node_colors[patch_to_improve] = 'green'
+    
+    nx.draw(G, positions, ax = ax1, node_size=150, cmap = sb.color_palette("coolwarm_r", as_cmap=True),
+            with_labels = True, node_color=node_colors)
+    nx.draw(G_recolonised, positions, ax = ax1, node_size=150, cmap = sb.color_palette("coolwarm_r", as_cmap=True),
+            with_labels = True,  edge_color='red', node_color=node_colors)
+    ax1.annotate('', xy=coords_patch_to_invade, xytext=(0,0.35),
+                 arrowprops=dict(facecolor='black', shrink=0.01))
+    ax1.set_title('Clustered')
+    limits=ax1.axis('on') # turns on axis
+    ax1.tick_params(left=True, bottom=True, labelleft=True, labelbottom=True)
+    
+    axins = ax1.inset_axes([0.7, 0.6, 0.3, 0.4])
+    axins.patch.set_alpha(0.3)  # Set inset plot background to transparent
+    
+    nx.draw(G_FW, pos, with_labels=False, node_size=10, node_color='black', 
+            arrows=True, edge_color='gray', font_size=10, ax = axins, width=0.5, )
+    
+    landscape = map_landscape[(map_landscape['restoration_type'] == 'scattered') & 
+                                        (map_landscape['restoration_seed'] == 1)]
+    coordinates = np.column_stack((landscape['x'], landscape['y']))
+    positions = dict(zip(G, coordinates))
+    node_colors = ['green' if x  else 'grey' for x in landscape['restored']]
+    
+    nx.draw(G, positions, ax = ax2, node_size=150, cmap = sb.color_palette("coolwarm_r", as_cmap=True),
+            with_labels = True, node_color=node_colors)
+    nx.draw(G_recolonised, positions, ax = ax2, node_size=150, cmap = sb.color_palette("coolwarm_r", as_cmap=True),
+            with_labels = True,  edge_color='red', node_color=node_colors)
+    ax2.annotate('', xy=coords_patch_to_invade, xytext=(0,0.35),
+                 arrowprops=dict(facecolor='black', shrink=0.01))
+    ax2.set_title('Scattered')
+    limits=ax2.axis('on') # turns on axis
+    ax2.tick_params(left=True, bottom=True, labelleft=True, labelbottom=True)
+    
+    axins = ax2.inset_axes([0.7, 0.6, 0.3, 0.4])
+    axins.patch.set_alpha(0.3)  # Set inset plot background to transparent
+    
+    nx.draw(G_FW, pos, with_labels=False, node_size=10, node_color='black', 
+            arrows=True, edge_color='gray', font_size=10, ax = axins, width=0.5)
+
+plt.savefig('D:/TheseSwansea/SFT/Figures/Network-ClusteredVsScattered.pdf', dpi = 1000, bbox_inches = 'tight')
+
+plt.savefig('D:/TheseSwansea/SFT/Figures/Network-ClusteredVsScattered.png', dpi = 1000, bbox_inches = 'tight')
 
 
 
@@ -219,7 +429,7 @@ for f in init_15P_files[0]:
                 
     plt.title("Invasion - control")
     
-    plt.savefig(f'D:/TheseSwansea/Patch-Models/Figures/PopDynamics.png', dpi = 400, bbox_inches = 'tight')
+    plt.savefig(f'D:/TheseSwansea/Patch-Models/Figures/PopDynamics.png', dpi = 1000, bbox_inches = 'tight')
 
     
     ## plotting all dynamics together
@@ -615,11 +825,11 @@ FW15_invasion_normal = pd.merge(FW15_invasion_normal, FW15_init_normal,
 
 
 ## calculate persistence (proportion of extant species compared to regional food web)
-FW15_init_normal['persistence'] = FW15_init_normal['S_local_init']/FW15_init_normal['S_init_landscape_init']
-FW15_init_normal['persistence_plants'] = FW15_init_normal['nb_plants_local_init']/FW15_init_normal['S_plants_init_landscape_init']
-FW15_init_normal['persistence_herb'] = FW15_init_normal['nb_herb_local_init']/FW15_init_normal['S_herb_init_landscape_init']
-FW15_init_normal['persistence_int'] = FW15_init_normal['nb_int_local_init']/FW15_init_normal['S_int_init_landscape_init']
-FW15_init_normal['persistence_top'] = FW15_init_normal['nb_top_local_init']/FW15_init_normal['S_top_init_landscape_init']
+FW15_init_normal['persistence_init'] = FW15_init_normal['S_local_init']/FW15_init_normal['S_init_landscape_init']
+FW15_init_normal['persistence_plants_init'] = FW15_init_normal['nb_plants_local_init']/FW15_init_normal['S_plants_init_landscape_init']
+FW15_init_normal['persistence_herb_init'] = FW15_init_normal['nb_herb_local_init']/FW15_init_normal['S_herb_init_landscape_init']
+FW15_init_normal['persistence_int_init'] = FW15_init_normal['nb_int_local_init']/FW15_init_normal['S_int_init_landscape_init']
+FW15_init_normal['persistence_top_init'] = FW15_init_normal['nb_top_local_init']/FW15_init_normal['S_top_init_landscape_init']
 
 FW15_invasion_normal['persistence'] = FW15_invasion_normal['S_local']/FW15_invasion_normal['S_init_landscape_init']
 FW15_invasion_normal['persistence_plants'] = FW15_invasion_normal['nb_plants']/FW15_invasion_normal['S_plants_init_landscape_init']
@@ -716,7 +926,10 @@ res15_invasion_normal[(res15_invasion_normal['nb_improved'] == 5) &
 
 ## persistence
 
-FW15_init_normal['persistence'].describe()
+FW15_init_normal['persistence_init'].describe()
+FW15_init_normal['persistence_plants_init'].describe() # mean plant persistence
+FW15_init_normal['persistence_herb_init'].describe()
+
 FW15_invasion_normal.groupby(['nb_improved']).agg({
     'persistence':'mean'})
 
@@ -853,6 +1066,11 @@ def cumulative_new_unique_sp_id_OrderRestoration(group):
 cumulative_SAC = grouped.apply(cumulative_new_unique_sp_id_OrderRestoration)
 cumulative_SAC = cumulative_SAC.reset_index()
 
+
+
+
+# %%%% plots
+
 ## 1 versus 5 patches
 sb.histplot(cumulative_SAC[cumulative_SAC['count_patch_improved'] == 1]['cumulative_new_sp_id_all'], bins = 50)
 sb.histplot(cumulative_SAC[cumulative_SAC['count_patch_improved'] == 5]['cumulative_new_sp_id_all'], bins = 50)
@@ -935,6 +1153,297 @@ biomass_diff_dataframe = pd.merge(biomass_diff_dataframe, landscape_characterist
                 how = 'outer')
 
 
+
+
+
+# %%%% Traits of new recolonising species across improvement levels
+
+
+# Group by the relevant columns including 'patch' (or a similar column indicating the patch order)
+grouped = res15_invasion_normal.groupby([
+    'sim','landscape_seed','restored_patches_seed','restoration_type'], dropna=False, as_index = False)
+
+
+def get_traits_latest_recolonisers(group):
+    
+    # Track the unique 'Sp_ID' encountered so far
+    
+    traits = pd.DataFrame()
+    ind_dt = 0   # index of dataframe 
+    
+    restored_patch_seed = group['restored_patches_seed'].unique()[0]
+    landscape_seed = group['landscape_seed'].unique()[0]
+    sim = group['sim'].unique()[0]
+    restoration_type = group['restoration_type'].unique()[0]
+    
+    encountered_sp_ids = group['sp_ID'][group['B_final_init'] >0]
+
+    for count_improved in [1,2,3,4,5]:
+        ind_dt+=1
+        
+        sub = group[(group['nb_improved'] == count_improved) &
+                    (group['dist_improved'] == 0)] ## we look only at improved patches for now
+            
+        # Current set of unique 'Sp_ID' in this patch
+        current_sp_ids = sub[sub['B_final'] > 0]['sp_ID'].unique()
+        
+        # new coloniser ids
+        new_sp_ids = np.setdiff1d(current_sp_ids, encountered_sp_ids)
+        
+        # Update the encountered 'Sp_ID' set
+        encountered_sp_ids = np.concatenate([encountered_sp_ids,current_sp_ids])
+
+        if len(new_sp_ids) > 0:
+            unique_first_encounters = sub[np.isin(sub['sp_ID'], new_sp_ids)].drop_duplicates(subset=['sp_ID'], keep='first')
+            new_sp_TP = unique_first_encounters['TP'].tolist()
+            new_sp_Gen = unique_first_encounters['Gen'].tolist()
+            new_sp_Vul = unique_first_encounters['Vul'].tolist()
+            new_sp_TL = unique_first_encounters['TL'].tolist()
+            new_sp_BS = unique_first_encounters['BS'].tolist()
+        else:
+            new_sp_ids = new_sp_TP = new_sp_Gen = new_sp_Vul = new_sp_TL = new_sp_BS = [np.nan]
+
+        
+        traits = pd.concat([traits,
+                            pd.DataFrame({'restored_patch_seed': restored_patch_seed,
+                                          'landscape_seed':landscape_seed,
+                                          'nb_improved': count_improved,
+                                          'restoration_type': restoration_type,
+                                          'sim':sim,
+                                          
+                                          'nb_new_sp':len(new_sp_ids),
+                                          'new_sp_ids': new_sp_ids,
+                                          'new_sp_BS': new_sp_BS,
+                                          'new_sp_Gen': new_sp_Gen,
+                                          'new_sp_Vul': new_sp_Vul,
+                                          'new_sp_TL': new_sp_TL,
+                                          'new_sp_TP': new_sp_TP
+                                          })
+                            ])
+        
+    return traits
+
+
+traits_new_colonisers = grouped.apply(get_traits_latest_recolonisers)
+traits_new_colonisers = traits_new_colonisers.reset_index()
+
+
+def get_SAR_restored(group):
+    
+    # Track the unique 'Sp_ID' encountered so far
+    
+    result = pd.DataFrame()
+    ind_dt = 0   # index of dataframe 
+    
+    restored_patch_seed = group['restored_patches_seed'].unique()[0]
+    landscape_seed = group['landscape_seed'].unique()[0]
+    sim = group['sim'].unique()[0]
+    restoration_type = group['restoration_type'].unique()[0]
+    
+    encountered_sp_ids = encountered_top_sp_ids = encountered_int_sp_ids = encountered_herb_sp_ids = encountered_plants_sp_ids = np.array([])
+    cumulative_biomass = cumulative_biomass_top = cumulative_biomass_int = cumulative_biomass_herb = cumulative_biomass_plants = np.nan
+
+    for count_improved in [1,2,3,4,5]:
+        ind_dt+=1
+        
+        sub = group[(group['nb_improved'] == count_improved) &
+                    (group['dist_improved'] == 0)] ## we look only at improved patches for now
+            
+        # Current set of unique 'Sp_ID' in this patch
+        current_sp_ids = sub[sub['B_final'] > 0]['sp_ID'].unique()
+        current_top_sp_ids = sub[(sub['B_final'] > 0) & (sub['TL'] == 3)]['sp_ID'].unique()
+        current_int_sp_ids = sub[(sub['B_final'] > 0) & (sub['TL'] == 2)]['sp_ID'].unique()
+        current_herb_sp_ids = sub[(sub['B_final'] > 0) & (sub['TL'] == 1)]['sp_ID'].unique()
+        current_plants_sp_ids = sub[(sub['B_final'] > 0) & (sub['TL'] == 0)]['sp_ID'].unique()
+
+        # Update the encountered 'Sp_ID' set
+        encountered_sp_ids = np.concatenate([encountered_sp_ids,current_sp_ids])
+        encountered_top_sp_ids = np.concatenate([encountered_top_sp_ids,current_top_sp_ids])
+        encountered_int_sp_ids = np.concatenate([encountered_int_sp_ids,current_int_sp_ids])
+        encountered_herb_sp_ids = np.concatenate([encountered_herb_sp_ids,current_herb_sp_ids])
+        encountered_plants_sp_ids = np.concatenate([encountered_plants_sp_ids,current_plants_sp_ids])
+        
+        cumulative_sum_value = len(np.unique(encountered_sp_ids))
+        cumulative_sum_value_top = len(np.unique(encountered_top_sp_ids))
+        cumulative_sum_value_int = len(np.unique(encountered_int_sp_ids))
+        cumulative_sum_value_herb = len(np.unique(encountered_herb_sp_ids))
+        cumulative_sum_value_plants = len(np.unique(encountered_plants_sp_ids))
+        # Return the cumulative sum as a new column
+        
+        
+        # np.stack allows for zero dimensional arrays to be concatenated
+        cumulative_biomass = np.nanmean(np.stack([cumulative_biomass, np.mean(sub[sub['B_final'] > 0]['B_final'])]))
+        cumulative_biomass_top = np.nanmean(np.stack([cumulative_biomass_top, np.mean(sub['B_final'][(sub['B_final'] > 0) & (sub['TL'] == 3)])]))
+        cumulative_biomass_int = np.nanmean(np.stack([cumulative_biomass_int, np.mean(sub['B_final'][(sub['B_final'] > 0) & (sub['TL'] == 2)])]))
+        cumulative_biomass_herb = np.nanmean(np.stack([cumulative_biomass_herb, np.mean(sub['B_final'][(sub['B_final'] > 0) & (sub['TL'] == 1)])]))
+        cumulative_biomass_plants = np.nanmean(np.stack([cumulative_biomass_plants, np.mean(sub['B_final'][(sub['B_final'] > 0) & (sub['TL'] == 0)])]))
+
+        result = pd.concat([result,
+                            pd.DataFrame({'restored_patch_seed': restored_patch_seed,
+                                          'landscape_seed':landscape_seed,
+                                          'nb_improved': count_improved,
+                                          'restoration_type': restoration_type,
+                                          
+                                          'cumulative_new_sp_id_all': cumulative_sum_value,
+                                          'cumulative_new_sp_id_top': cumulative_sum_value_top,
+                                          'cumulative_new_sp_id_int':cumulative_sum_value_int,
+                                          'cumulative_new_sp_id_herb': cumulative_sum_value_herb,
+                                          'cumulative_new_sp_id_plants': cumulative_sum_value_plants,
+                                          
+                                          'cumulative_biomass_all':cumulative_biomass,
+                                          'cumulative_biomass_top':cumulative_biomass_top,
+                                          'cumulative_biomass_int':cumulative_biomass_int,
+                                          'cumulative_biomass_herb':cumulative_biomass_herb,
+                                          'cumulative_biomass_plants':cumulative_biomass_plants,
+                                          'sim':sim}, index = [ind_dt])
+                            ])
+        
+
+    return result
+
+SAR_restored = grouped.apply(get_SAR_restored)
+SAR_restored = SAR_restored.reset_index()
+
+
+
+
+# %%%% Supp figure 6
+
+traits_new_colonisers_invadedPatch = traits_new_colonisers
+palette = sb.color_palette("coolwarm", len(traits_new_colonisers_invadedPatch['new_sp_TL'].unique()))
+
+
+# Create subplots side by side
+fig, axes = plt.subplots(1, 3, figsize=(14, 6))
+
+# Plot for data1 with continuous lines on the first subplot
+for i, tl in enumerate(np.sort(traits_new_colonisers_invadedPatch['degree_patch'].unique())):
+    sb.pointplot(data=traits_new_colonisers_invadedPatch[traits_new_colonisers_invadedPatch['new_sp_TL'] == tl], 
+                 x='nb_improved', y='new_sp_Gen', 
+                 color=palette[i], order=[0,1,2,3,4,5], ax=axes[0])
+
+# Customize the first plot
+axes[0].set_ylabel("Mean generality of new recolonisers")
+axes[0].set_xlabel("Number of improved patches")
+axes[0].legend()
+# axes[0].set_ylabel('Diet breadth of recoloniser')
+# axes[0].set_xlabel('Mean food chain length of recolonised food web')
+
+# Plot for data2 with dotted lines on the second subplot
+for i, tl in enumerate(np.sort(traits_new_colonisers_invadedPatch['new_sp_TL'].unique())):
+    axes[1].set_yscale('log')
+    sb.pointplot(data=traits_new_colonisers_invadedPatch[traits_new_colonisers_invadedPatch['new_sp_TL'] == tl], 
+                 x='nb_improved', y='new_sp_BS', 
+                 color=palette[i], order=[0,1,2,3,4,5], ax=axes[1])
+
+# Customize the second plot
+axes[1].legend()
+axes[1].set_ylabel("Mean body mass of new recolonisers (logged)")
+axes[1].set_xlabel("Number of improved patches")
+
+# Plot for data2 with dotted lines on the second subplot
+for i, tl in enumerate(np.sort(traits_new_colonisers_invadedPatch['new_sp_TL'].unique())):
+    sb.pointplot(data=traits_new_colonisers_invadedPatch[traits_new_colonisers_invadedPatch['new_sp_TL'] == tl], x='nb_improved', y='new_sp_Vul', 
+                 color=palette[i], order=[0,1,2,3,4,5], ax=axes[2], label = tl)
+
+# Customize the second plot
+axes[2].legend(title = "Trophic level")
+axes[2].set_ylabel("Mean vulnerability of new recolonisers")
+axes[2].set_xlabel("Number of improved patches")
+
+# Adjust layout
+plt.tight_layout()
+# plt.ylabel('Diet breadth of recoloniser')
+# plt.xlabel('Mean food chain length of recolonised food web')
+plt.savefig('D:/TheseSwansea/SFT/Figures/SuppFigure6.png', dpi = 1000, bbox_inches = 'tight')
+
+
+
+
+### distance of improved patch to other patches
+
+import statsmodels.api as sm
+from statsmodels.formula.api import glm
+
+
+invasions_byTL = res15_invasion_normal.copy()
+## turm into categorical so that it includes zero counts
+invasions_byTL['successful_invaders_initial_pop'] = pd.Categorical(invasions_byTL['successful_invaders_initial_pop'])
+invasions_byTL = invasions_byTL.groupby(['sim','landscape_seed','restored_patches_seed',
+                                         'nb_improved','patch','restoration_type','TL'], dropna = False, observed = False)['successful_invaders_initial_pop'].value_counts().reset_index(name='Count')
+
+# remove clustered simulations that were added artifically here and that all have zero counts
+invasions_byTL = invasions_byTL[~((invasions_byTL['restoration_type'] == 'clustered') &
+                                  (~np.isnan(invasions_byTL['restored_patches_seed'])))]
+
+
+invasions_byTL = pd.merge(invasions_byTL, FW15_init_normal, on = ['landscape_seed','sim','patch'])
+invasions_byTL = pd.merge(invasions_byTL, FW15_invasion_normal[['sim','nb_improved', 'landscape_seed', 'restored_patches_seed', 'patch', 'dist_invasion','dist_improved','latest_patch_improved']], 
+                          on = ['sim','nb_improved', 'landscape_seed', 'restored_patches_seed','patch'], 
+                          how = 'outer')
+
+invasions_byTL = invasions_byTL[invasions_byTL['successful_invaders_initial_pop']]
+
+invasions_byTL.loc[np.isnan(invasions_byTL['restored_patches_seed']),'restored_patches_seed'] = -1
+invasions_byTL['restored_patches_seed'].unique()
+
+invasions_byTL = pd.get_dummies(invasions_byTL, columns=['restoration_type']) ## create binary variable for restoration type (clustered/scattered)
+
+invasions_byTL = pd.merge(invasions_byTL, landscape_characteristics[['distance_center', 'degree_patch', 'landscape_seed','Patch']], 
+                          left_on = ['patch','landscape_seed'],
+                          right_on = ['Patch','landscape_seed'])
+
+
+invasions_byTL_oneImprovement = invasions_byTL[invasions_byTL['nb_improved'] == 1]
+invasions_byTL_oneImprovement = pd.merge(invasions_byTL_oneImprovement,landscape_characteristics[['distance_center', 'degree_patch', 'landscape_seed','Patch']], 
+                          left_on = ['latest_patch_improved','landscape_seed'],
+                          right_on = ['Patch','landscape_seed'], suffixes=['','_ImprovedPatch'])
+
+formula = 'Count ~ degree_patch_ImprovedPatch'
+model = glm(formula=formula, data=invasions_byTL_oneImprovement, family=sm.families.Poisson()).fit()
+print(model.summary())
+
+degree_range = np.linspace(invasions_byTL_oneImprovement['degree_patch_ImprovedPatch'].min(),
+                           invasions_byTL_oneImprovement['degree_patch_ImprovedPatch'].max(), 100)
+
+# Prepare the new data for prediction (cross product of TL categories and degree_patch_ImprovedPatch values)
+prediction_data = pd.DataFrame([(degree) for degree in degree_range], 
+                               columns=['degree_patch_ImprovedPatch'])
+
+# Add predictions using the GLM model
+prediction_data['Count_predicted'] = model.predict(prediction_data)
+
+# Get standard errors of the predictions
+predictions_with_se = model.get_prediction(prediction_data)
+prediction_summary = predictions_with_se.summary_frame()
+
+# Add 95% confidence intervals to the prediction data
+prediction_data['ci_lower'] = prediction_summary['mean_ci_lower']
+prediction_data['ci_upper'] = prediction_summary['mean_ci_upper']
+
+# Plotting the results
+plt.figure(figsize=(8, 6))
+
+# Plot each trophic level category separately
+subset = prediction_data
+# Plot the predicted values
+plt.plot(subset['degree_patch_ImprovedPatch'], subset['Count_predicted'])
+
+# Plot the ribbon for 95% confidence intervals
+plt.fill_between(subset['degree_patch_ImprovedPatch'], subset['ci_lower'], subset['ci_upper'], 
+                 alpha=0.3)
+sub = invasions_byTL_oneImprovement
+sb.scatterplot(data = sub, x = 'degree_patch_ImprovedPatch', y = 'Count')
+plt.ylabel('Number of recolonisations')
+plt.xlabel('Euclidian distance of improved patch to other patches')
+plt.legend(title = 'Trophic level')
+
+plt.savefig('D:/TheseSwansea/SFT/Figures/OnePatchImproved-Distance.png', dpi = 1000, bbox_inches = 'tight')
+
+
+
+
+
 # %%%% plot of effect of first patch improvement on species richness
 
 
@@ -942,7 +1451,7 @@ fig, ([ax1, ax2]) = plt.subplots(nrows=1, ncols=2, figsize=(8,4), sharex = True)
 fig.tight_layout(pad = 3)
 
 sb.regplot(cumulative_SAC_plot[(cumulative_SAC_plot['count_patch_improved'] == 1)], 
-               y = 'cumulative_biomass_all', x = 'degree_patch', 
+               y = 'cumulative_new_sp_id_all', x = 'degree_patch', 
                ax = ax1)
 ax1.set_ylabel('Initial biomass')
 ax1.set_xlabel('Mean euclidian distance of first'
@@ -952,8 +1461,13 @@ ax1.set_title('Initial biomass in first'
               '\n'
               'restored patch (before restoration)')
 
-sb.regplot(diff_dataframe[diff_dataframe['nb_improved'] == 1], 
+sb.regplot(diff_dataframe[(diff_dataframe['nb_improved'] == 1) &
+                          (diff_dataframe['restoration_type'] == 'clustered')], 
                x = 'degree_patch', y = 'S_localmeandiff', ax = ax2)
+sb.regplot(diff_dataframe[(diff_dataframe['nb_improved'] == 1) &
+                          (diff_dataframe['restoration_type'] == 'scattered')], 
+               x = 'degree_patch', y = 'S_localmeandiff', ax = ax2, 
+               color = 'red')
 ax2.set_ylabel('Number of species gained per patch')
 ax2.set_xlabel('Mean euclidian distance of'
                '\n'
@@ -962,7 +1476,7 @@ ax2.set_title('Species gained in any patch depending on the'
               '\n'
               'location of the first patch improved')
 
-plt.savefig('D:/TheseSwansea/SFT/Figures/FirstPatchImprovement.png', dpi = 400, bbox_inches = 'tight')
+plt.savefig('D:/TheseSwansea/SFT/Figures/FirstPatchImprovement.png', dpi = 1000, bbox_inches = 'tight')
 
 
 # %%%% plot of effect of first patch improvement on biomass
@@ -992,37 +1506,118 @@ ax2.set_title('Species gained in any patch'
               '\n'
               'after one patch improvement')
 
-plt.savefig('D:/TheseSwansea/SFT/Figures/FirstPatchImprovement.png', dpi = 400, bbox_inches = 'tight')
+plt.savefig('D:/TheseSwansea/SFT/Figures/FirstPatchImprovement.png', dpi = 1000, bbox_inches = 'tight')
 
 
 
 # %%%% plots of initial SAC versus recolonisation outcomes
 
-fig, ([ax1, ax2]) = plt.subplots(nrows=1, ncols=2, figsize=(8,4), sharex = True)
-fig.tight_layout(pad = 3)
+
+restored_patches_dtf['first_patch_restored'] = [sublist[0] for sublist in restored_patches_dtf['patches_to_restore']]
+
+SAR_restored = pd.merge(SAR_restored,restored_patches_dtf, 
+                          left_on = 'restored_patch_seed',
+                          right_on = 'restoration_seed')
+
+## add distance of improved patch to other patches
+SAR_restored = pd.merge(SAR_restored,
+                          landscape_characteristics[['distance_center', 'degree_patch', 'landscape_seed','Patch']], 
+                          left_on = ['first_patch_restored','landscape_seed'],
+                          right_on = ['Patch','landscape_seed'], 
+                          suffixes=['','_ImprovedPatch'],
+                          how = 'left')
+
+cumulative_SAC = pd.merge(cumulative_SAC,restored_patches_dtf, 
+                          left_on = 'restored_patch_seed',
+                          right_on = 'restoration_seed')
+pd.merge(cumulative_SAC, landscape_characteristics[['distance_center', 'degree_patch', 'landscape_seed','Patch']], 
+                          left_on = ['first_patch_restored','landscape_seed'],
+                          right_on = ['Patch','landscape_seed'], 
+                          suffixes=['','_ImprovedPatch'],
+                          how = 'left')
+cumulative_SAC = pd.merge(cumulative_SAC,
+                          landscape_characteristics[['distance_center', 'degree_patch', 'landscape_seed','Patch']], 
+                          left_on = ['first_patch_restored','landscape_seed'],
+                          right_on = ['Patch','landscape_seed'], 
+                          suffixes=['','_ImprovedPatch'],
+                          how = 'left')
+
+
+# %%%%% Figure 5
+
+from matplotlib.colors import Normalize
+from matplotlib.cm import ScalarMappable
+
+# Set up the continuous color palette using `hue` and `hue_norm` for patch isolation
+cmap = sb.color_palette("coolwarm", as_cmap=True)  # Example colormap
+degree_patch_values = cumulative_SAC['degree_patch'].values
+norm = Normalize(vmin=np.min(degree_patch_values), vmax=np.max(degree_patch_values))  # Normalize the degree_patch values
+
+fig, ([ax3,ax4]) = plt.subplots(nrows=1, ncols=2, figsize=(8,4), sharex = True, sharey = True)
+plt.subplots_adjust(top=0.85, wspace=0.2, hspace=0.2)
+
+# Plot the second pointplot (for restored patches with a continuous color scale)
+
+# sb.pointplot(data = cumulative_SAC[np.isnan(cumulative_SAC['restored_patch_seed'])], 
+#              y = 'cumulative_new_sp_id_all', x = 'count_patch_improved', 
+#              hue='degree_patch', hue_norm=norm, ax = ax1, order = [0,1,2,3,4,5], palette=cmap)
+# sb.pointplot(data=cumulative_SAC[~np.isnan(cumulative_SAC['restored_patch_seed'])],
+#              y='cumulative_new_sp_id_all', x='count_patch_improved',
+#              linestyles='dotted', hue='degree_patch', palette=cmap,
+#              hue_norm=norm, ax=ax1, order = [0,1,2,3,4,5])
+# # Remove the default legend
+# ax1.legend_.remove()
+# ax1.set_xlabel('Number of patches')
+# ax1.set_ylabel('Cumulative number of species')
+# ax1.set_title('Initial simulation')
+# ax1.annotate('A', xy = (-0.1,1.1), verticalalignment='top', xycoords='axes fraction', fontsize='large')
+
+# sb.pointplot(data = SAR_restored[(np.isnan(SAR_restored['restored_patch_seed']))], 
+#              y = 'cumulative_new_sp_id_all', x = 'nb_improved', hue_norm=norm, 
+#              hue = 'degree_patch', ax = ax2, palette=cmap)
+# sb.pointplot(data = SAR_restored[(~np.isnan(SAR_restored['restored_patch_seed']))], 
+#              y = 'cumulative_new_sp_id_all', x = 'nb_improved', hue_norm=norm,
+#              linestyles='dotted', hue = 'degree_patch', palette=cmap, ax = ax2)
+# ax2.set_xlabel('Number of patches improved')
+# ax2.set_ylabel('Cumulative number of species')
+# ax2.legend().remove()
+# ax2.set_title('Restored simulation')
+# ax2.annotate('B', xy = (-0.1,1.1), verticalalignment='top', xycoords='axes fraction', fontsize='large')
+
+# # Add a colorbar for the continuous color legend
+# sm = ScalarMappable(norm=norm, cmap=cmap)
+# sm.set_array([])
+# cbar = fig.colorbar(sm, ax=[ax1, ax2, ax3, ax4], pad=0.1, aspect=40)
+# cbar.set_label('Isolation of first restored patch', labelpad=10)
+
+
+sb.set(font_scale=1.5)
 
 sb.pointplot(data = cumulative_SAC[np.isnan(cumulative_SAC['restored_patch_seed'])], 
              y = 'cumulative_new_sp_id_all', x = 'count_patch_improved', 
-             color = 'black', ax = ax1, order = [0,1,2,3,4,5])
+             color = 'black', ax = ax3, order = [0,1,2,3,4,5])
 sb.pointplot(data = cumulative_SAC[~np.isnan(cumulative_SAC['restored_patch_seed'])], y = 'cumulative_new_sp_id_all', x = 'count_patch_improved',
-             linestyles='dotted', color = 'grey', hue = 'restored_patch_seed', palette = 'coolwarm',
-             ax = ax1)
-ax1.set_xlabel('Number of patches')
-ax1.set_ylabel('Cumulative number of species')
-ax1.legend(title = 'Restoration sequence', bbox_to_anchor = [2,1.3], ncol = 6)
-
-
-sb.pointplot(data = FW15_invasion_normal[np.isnan(FW15_invasion_normal['restored_patches_seed'])], 
-             y = 'S_local', x = 'nb_improved', 
-             color = 'black', ax = ax2)
-sb.pointplot(data = FW15_invasion_normal[~np.isnan(FW15_invasion_normal['restored_patches_seed'])], 
-             y = 'S_local', x = 'nb_improved', 
-             linestyles='dotted', color = 'grey', hue = 'restored_patches_seed', palette = 'coolwarm', ax = ax2)
-plt.xlabel('Number of patches')
-plt.ylabel('Cumulative number of species')
+             linestyles='dotted', color = 'grey', 
+             ax = ax3)
+ax3.set_xlabel('Number of patches')
+ax3.set_ylabel('Cumulative number of species')
 plt.legend().remove()
+ax3.annotate('A', xy = (-0.1,1.1), verticalalignment='top', xycoords='axes fraction', fontsize='large')
 
-plt.savefig('D:/TheseSwansea/SFT/Figures/SAC_RestorationOrder-ActualOutcome.png', dpi = 400, bbox_inches = 'tight')
+sb.pointplot(data = SAR_restored[(np.isnan(SAR_restored['restored_patch_seed']))], 
+             y = 'cumulative_new_sp_id_all', x = 'nb_improved', 
+             color = 'black', ax = ax4)
+sb.pointplot(data = SAR_restored[(~np.isnan(SAR_restored['restored_patch_seed']))], 
+             y = 'cumulative_new_sp_id_all', x = 'nb_improved',
+             linestyles='dotted', color = 'grey', 
+             ax = ax4)
+ax4.set_xlabel('Number of patches improved')
+ax4.set_ylabel('Cumulative number of species')
+ax4.legend().remove()
+ax4.annotate('B', xy = (-0.1,1.1), verticalalignment='top', xycoords='axes fraction', fontsize='large')
+
+# plt.savefig('D:/TheseSwansea/SFT/Figures/SAC_RestorationOrder-ActualOutcome.pdf')
+plt.savefig('D:/TheseSwansea/SFT/Figures/Fig5.png', dpi = 1000, bbox_inches = 'tight')
 
 
 
@@ -1072,150 +1667,12 @@ ax4.set_ylabel('Mean species biomass before recolonisation')
 ax4.annotate('B', xy = (-0.1,1.1), verticalalignment='top', xycoords='axes fraction', fontsize='large')
 
 
-plt.savefig('D:/TheseSwansea/SFT/Figures/SuppSAC.png', dpi = 400, bbox_inches = 'tight')
+plt.savefig('D:/TheseSwansea/SFT/Figures/SuppSAC.png', dpi = 1000, bbox_inches = 'tight')
 
 
 
 
 
-
-# %% Traits of new recolonising species across improvement levels
-
-
-# Group by the relevant columns including 'patch' (or a similar column indicating the patch order)
-grouped = res15_invasion_normal.groupby([
-    'sim','landscape_seed','restored_patches_seed','restoration_type'], dropna=False, as_index = False)
-
-
-def get_traits_latest_recolonisers(group):
-    
-    # Track the unique 'Sp_ID' encountered so far
-    
-    result = pd.DataFrame()
-    ind = 0   # index of dataframe 
-    
-    for patch in group['patch'].unique():  
-        
-        restored_patch_seed = group['restored_patches_seed'].unique()[0]
-        landscape_seed = group['landscape_seed'].unique()[0]
-        sim = group['sim'].unique()[0]
-        restoration_type = group['restoration_type'].unique()[0]
-        
-        encountered_sp_ids = res15_init_normal[(res15_init_normal['landscape_seed'] == landscape_seed) &
-                                               (res15_init_normal['sim'] == sim) &
-                                               (res15_init_normal['patch'] == patch) &
-                                               (res15_init_normal['B_final_init'] > 0)]['sp_ID']
-        cumulative_biomass = 0
-    
-        for count_improved in np.sort(group['nb_improved'].unique()):
-            
-        #print('patch', patch,'nb_improved', count_improved)
-            
-            ind+=1
-            sub = group[(group['patch'] == patch) & (group['nb_improved'] == count_improved)]
-                        
-            # Current set of unique 'Sp_ID' in this patch
-            current_sp_ids = sub[sub['B_final'] > 0]['sp_ID'].unique()
-            
-            # Update the encountered 'Sp_ID' set
-            new_sp_ids = np.setdiff1d(current_sp_ids, encountered_sp_ids)
-            # print('encountered', encountered_sp_ids, 'current', current_sp_ids)
-            
-            encountered_sp_ids = np.concatenate([encountered_sp_ids,current_sp_ids])
-            
-            
-            
-            if len(new_sp_ids) > 0:
-                new_sp_TP = sub[np.isin(sub['sp_ID'],new_sp_ids)]['TP'].tolist()
-                new_sp_Gen = sub[np.isin(sub['sp_ID'],new_sp_ids)]['Gen'].tolist()
-                new_sp_Vul = sub[np.isin(sub['sp_ID'],new_sp_ids)]['Vul'].tolist()
-                new_sp_TL = sub[np.isin(sub['sp_ID'],new_sp_ids)]['TL'].tolist()
-                new_sp_BS = sub[np.isin(sub['sp_ID'],new_sp_ids)]['BS'].tolist()
-            else:
-                new_sp_ids = new_sp_TP = new_sp_Gen = new_sp_Vul = new_sp_TL = new_sp_BS = [np.nan]
-            
-            # print('new', new_sp_ids)
-            
-            cumulative_sum_value = len(np.unique(encountered_sp_ids))
-            # Return the cumulative sum as a new column
-            
-            cumulative_biomass+= np.sum(sub['B_final'])
-            
-            result = pd.concat([result,
-                                pd.DataFrame({'patch':patch,
-                                              'restored_patch_seed': restored_patch_seed,
-                                              'cumulative_new_sp_id': cumulative_sum_value,
-                                              'cumulative_biomass':cumulative_biomass,
-                                              'nb_improved': count_improved,
-                                              'landscape_seed':landscape_seed,
-                                              'sim':sim,
-                                              'restoration_type': restoration_type,
-                                              'dist_invasion': sub['dist_invasion'].unique()[0],
-                                              'dist_improved': sub['dist_improved'].unique()[0],
-                                              'deltaR': sub['deltaR'].unique()[0],
-                                              
-                                            
-                                              'nb_new_sp':len(new_sp_ids),
-                                              'new_sp_ids': new_sp_ids,
-                                              'new_sp_BS': new_sp_BS,
-                                              'new_sp_Gen': new_sp_Gen,
-                                              'new_sp_Vul': new_sp_Vul,
-                                              'new_sp_TL': new_sp_TL,
-                                              'new_sp_TP': new_sp_TP
-                                              }).reset_index()
-                                ])
-
-    return result
-
-traits_new_colonisers = grouped.apply(get_traits_latest_recolonisers)
-traits_new_colonisers = traits_new_colonisers.reset_index()
-
-
-traits_new_colonisers_invadedPatch = traits_new_colonisers
-palette = sb.color_palette("coolwarm", len(traits_new_colonisers_invadedPatch['new_sp_TL'].unique()))
-# Create subplots side by side
-fig, axes = plt.subplots(1, 3, figsize=(14, 6))
-
-# Plot for data1 with continuous lines on the first subplot
-for i, tl in enumerate(np.sort(traits_new_colonisers_invadedPatch['new_sp_TL'].unique())):
-    sb.pointplot(data=traits_new_colonisers_invadedPatch[traits_new_colonisers_invadedPatch['new_sp_TL'] == tl], 
-                 x='nb_improved', y='new_sp_Gen', 
-                 color=palette[i], order=[0,1,2,3,4,5], ax=axes[0])
-
-# Customize the first plot
-axes[0].set_ylabel("Mean generality of new recolonisers")
-axes[0].set_xlabel("Number of improved patches")
-axes[0].legend()
-# axes[0].set_ylabel('Diet breadth of recoloniser')
-# axes[0].set_xlabel('Mean food chain length of recolonised food web')
-
-# Plot for data2 with dotted lines on the second subplot
-for i, tl in enumerate(np.sort(traits_new_colonisers_invadedPatch['new_sp_TL'].unique())):
-    axes[1].set_yscale('log')
-    sb.pointplot(data=traits_new_colonisers_invadedPatch[traits_new_colonisers_invadedPatch['new_sp_TL'] == tl], 
-                 x='nb_improved', y='new_sp_BS', 
-                 color=palette[i], order=[0,1,2,3,4,5], ax=axes[1])
-
-# Customize the second plot
-axes[1].legend()
-axes[1].set_ylabel("Mean body mass of new recolonisers (logged)")
-axes[1].set_xlabel("Number of improved patches")
-
-# Plot for data2 with dotted lines on the second subplot
-for i, tl in enumerate(np.sort(traits_new_colonisers_invadedPatch['new_sp_TL'].unique())):
-    sb.pointplot(data=traits_new_colonisers_invadedPatch[traits_new_colonisers_invadedPatch['new_sp_TL'] == tl], x='nb_improved', y='new_sp_Vul', 
-                 color=palette[i], order=[0,1,2,3,4,5], ax=axes[2], label = tl)
-
-# Customize the second plot
-axes[2].legend(title = "Trophic level")
-axes[2].set_ylabel("Mean vulnerability of new recolonisers")
-axes[2].set_xlabel("Number of improved patches")
-
-# Adjust layout
-plt.tight_layout()
-# plt.ylabel('Diet breadth of recoloniser')
-# plt.xlabel('Mean food chain length of recolonised food web')
-plt.savefig('D:/TheseSwansea/SFT/Figures/SuppFigure6.png', dpi = 400, bbox_inches = 'tight')
 
 
 # %% Plots
@@ -1264,7 +1721,7 @@ ax2.set_ylabel('Number of species')
 ax2.set_xlabel('Patch quality')
 ax2.legend().remove()
 
-plt.savefig('D:/TheseSwansea/SFT/Figures/SuppFigure4.png', dpi = 400, bbox_inches = 'tight')
+plt.savefig('D:/TheseSwansea/SFT/Figures/SuppFigure4.png', dpi = 1000, bbox_inches = 'tight')
 
 FW15_invasion_normal.groupby('deltaR').agg({'S_local':'mean'})
 
@@ -1276,7 +1733,7 @@ sum_init15 = res15_init_normal[res15_invasion_normal['B_final'] > 0].groupby([ #
     'sim','landscape_seed','patch','TL_init'], dropna = False).agg({'B_final_init':['sum', 'mean','count']}).reset_index()
 sum_init15.columns = list(map(''.join, sum_init15.columns.values))
 sum_init15['nb_improved'] = 'Initial'
-FW15_init_normal['nb_improved'] = 'Initial'
+FW15_init_normal['nb_improved_init'] = 'Initial'
 
 # after recolonisation
 sum_res15 = res15_invasion_normal[res15_invasion_normal['B_final'] > 0].groupby([
@@ -1321,119 +1778,8 @@ fig, ([ax2, ax3, ax7], [ax5, ax6, ax8]) = plt.subplots(nrows=2, ncols=3, figsize
 fig.tight_layout(pad = 4)
 colors = sb.color_palette("coolwarm", len(unique_categories))
 
-## Change in TOTAL biomass across improvement levels from initial to 5 patches restored
-### clustered landscape - full line
-sb.pointplot(data = sum_res15[sum_res15['restoration_type'] != 'scattered'],  ## restored simulation 
-                  y = 'B_finalsum', 
-                  hue = 'TL', 
-                  x = 'nb_improved', 
-                  palette = sb.color_palette("coolwarm", len(unique_categories)),
-                  estimator = 'mean',
-                  ax = ax2, order = ['Initial',0,1,2,3,4,5])
-sb.pointplot(data = sum_init15,  ## initial simulation 
-                  y = 'B_final_initsum', 
-                  hue = 'TL_init', 
-                  x = 'nb_improved', 
-                  palette = sb.color_palette("coolwarm", len(unique_categories)),
-                  estimator = 'mean',
-                  ax = ax2)
-### scattered landscape = dotted (initial are the same as above, so no need to add them again)
-sb.pointplot(data = sum_res15[sum_res15['restoration_type'] != 'clustered'], 
-                  y = 'B_finalsum', 
-                  hue = 'TL', 
-                  x = 'nb_improved', 
-                  palette = sb.color_palette("coolwarm", len(unique_categories)),
-                  estimator = 'mean',
-                  ax = ax2,
-                  linestyles='dotted')
-ax2.set_xlabel('Number of improved patches')
-ax2.set_ylabel('Total biomass after recolonisation')
-ax2.legend().remove()
-ax2.annotate('A', xy = (-0.1,1.1), verticalalignment='top', xycoords='axes fraction', fontsize='large')
-
-## Change in MEAN biomass across improvement levels from initial to 5 patches restored
-## clustered landscape
-sb.pointplot(data = sum_res15[sum_res15['restoration_type'] != 'scattered'], 
-                  y = 'B_finalmean', 
-                  hue = 'TL', 
-                  x = 'nb_improved', 
-                  palette = sb.color_palette("coolwarm", len(unique_categories)),
-                  estimator = 'mean',
-                  ax = ax5)
-sb.pointplot(data = sum_init15, 
-                  y = 'B_final_initmean', 
-                  hue = 'TL_init', 
-                  x = 'nb_improved', 
-                  palette = sb.color_palette("coolwarm", len(unique_categories)),
-                  estimator = 'mean',
-                  ax = ax5)
-## scattered landscape = dotted
-sb.pointplot(data = sum_res15[sum_res15['restoration_type'] != 'clustered'], 
-                  y = 'B_finalmean', 
-                  hue = 'TL', 
-                  x = 'nb_improved', 
-                  palette = sb.color_palette("coolwarm", len(unique_categories)),
-                  estimator = 'mean',
-                  ax = ax5,
-                  linestyles='dotted')
-ax5.set_xlabel('Number of improved patches')
-ax5.set_ylabel('Mean species biomass after recolonisation')
-ax5.annotate('B', xy = (-0.1,1.1), verticalalignment='top', xycoords='axes fraction', fontsize='large')
-ax5.legend().remove()
-
-
-## Change in persistence across improvement levels from initial to 5 patches restored
-sb.pointplot(data = FW15_invasion_normal[(FW15_invasion_normal['restoration_type'] != 'scattered')], 
-             y = 'persistence_int', 
-             x = 'nb_improved',
-             color = colors[2],
-             ax = ax3)
-sb.pointplot(data = FW15_init_normal, 
-             y = 'persistence_int', 
-             x = 'nb_improved',
-             color = colors[2],
-             ax = ax3)
-sb.pointplot(data = FW15_invasion_normal[(FW15_invasion_normal['stage'] != 'init') &
-                                         (FW15_invasion_normal['restoration_type'] != 'clustered')], 
-             y = 'persistence_int', 
-             x = 'nb_improved', 
-             color = colors[2],
-             ax = ax3,
-             linestyles='dotted')
-ax3.set_ylabel('Persistence of intermediate species'
-               ''
-               'after recolonisation')
-ax3.set_xlabel('Number of improved patches')
-ax3.annotate('C', xy = (-0.1,1.1), verticalalignment='top', xycoords='axes fraction', fontsize='large')
-
-## Change in persistence across trophic levels 
-
-## Persistence of top species - clustered
-sb.pointplot(data = FW15_invasion_normal[(FW15_invasion_normal['stage'] != 'init') &
-                                         (FW15_invasion_normal['restoration_type'] != 'scattered')], 
-             y = 'persistence_top', 
-             x = 'nb_improved',
-             color = colors[3],
-             ax = ax6)
-sb.pointplot(data = FW15_init_normal, 
-             y = 'persistence_top', 
-             x = 'nb_improved',
-             color = colors[3],
-             ax = ax6)
-## scattered
-sb.pointplot(data = FW15_invasion_normal[(FW15_invasion_normal['stage'] != 'init') &
-                                         (FW15_invasion_normal['restoration_type'] != 'clustered')], 
-             y = 'persistence_top', 
-             x = 'nb_improved',
-             color = colors[3],
-             ax = ax6,
-             linestyles='dotted')
-ax6.set_ylabel('Persistence of top species after recolonisation')
-ax6.set_xlabel('Number of improved patches')
-ax6.legend().remove()
-ax6.annotate('D', xy = (-0.1,1.1), verticalalignment='top', xycoords='axes fraction', fontsize='large')
-
-
+for ax in [ax2, ax3, ax7, ax5, ax6, ax8]:
+    ax.tick_params(axis='both', which='major', labelsize=12)
 
 ## barplots of extinctions and recolonisations
 
@@ -1452,11 +1798,11 @@ extinctions_dataframe = extinctions_dataframe[~((extinctions_dataframe['restorat
 sb.barplot(data = extinctions_dataframe[extinctions_dataframe['extinct']],
            y = 'Count', x = 'nb_improved', hue = 'TL', 
            palette = sb.color_palette("coolwarm", len(unique_categories)), estimator = 'mean',
-           ax = ax7)
-ax7.set_ylabel('Number of extinctions after recolonisation')
-ax7.set_xlabel('Number of improved patches')
-ax7.annotate('E', xy = (-0.1,1.1), verticalalignment='top', xycoords='axes fraction', fontsize='large')
-ax7.legend(bbox_to_anchor = [0.6, 1.3], title = 'Trophic level', ncols = 2)
+           ax = ax2, order = ['Initial',0,1,2,3,4,5])
+ax2.set_ylabel('Number of extinctions after recolonisation', fontsize=14)
+ax2.set_xlabel('Number of improved patches', fontsize=14)
+ax2.annotate('A', xy = (-0.1,1.1), verticalalignment='top', xycoords='axes fraction', fontsize='large')
+ax2.legend(bbox_to_anchor = [0.6, 1.3], title = 'Trophic level', ncols = 2)
 
 
 ## invasion dataframe
@@ -1473,20 +1819,139 @@ invasion_dataframe = invasion_dataframe.groupby(
 invasion_dataframe = invasion_dataframe[~((invasion_dataframe['restoration_type'] == 'clustered') &
                                           (~np.isnan(invasion_dataframe['restored_patches_seed'])))]
 
+invasion_dataframe[invasion_dataframe['successful_invaders_initial_pop']].groupby(['TL','nb_improved']).agg({'Count':'mean'})
 
 sb.barplot(data = invasion_dataframe[invasion_dataframe['successful_invaders_initial_pop']],
            y = 'Count', x = 'nb_improved', hue = 'TL', 
            palette = sb.color_palette("coolwarm", len(unique_categories)), estimator = 'mean',
-           ax = ax8)
-ax8.set_ylabel('Number of recolonising species')
-ax8.set_xlabel('Number of improved patches')
-ax8.annotate('F', xy = (-0.1,1.1), verticalalignment='top', xycoords='axes fraction', fontsize='large')
+           ax = ax5)
+ax5.set_ylabel('Number of recolonising species', fontsize=14)
+ax5.set_xlabel('Number of improved patches', fontsize=14)
+ax5.annotate('B', xy = (-0.1,1.1), verticalalignment='top', xycoords='axes fraction', fontsize='large')
+ax5.legend().remove()
+
+
+## Change in TOTAL biomass across improvement levels from initial to 5 patches restored
+### clustered landscape - full line
+sb.pointplot(data = sum_res15[sum_res15['restoration_type'] != 'scattered'],  ## restored simulation 
+                  y = 'B_finalsum', 
+                  hue = 'TL', 
+                  x = 'nb_improved', 
+                  palette = sb.color_palette("coolwarm", len(unique_categories)),
+                  estimator = 'mean',
+                  ax = ax3)
+sb.pointplot(data = sum_init15,  ## initial simulation 
+                  y = 'B_final_initsum', 
+                  hue = 'TL_init', 
+                  x = 'nb_improved', 
+                  palette = sb.color_palette("coolwarm", len(unique_categories)),
+                  estimator = 'mean',
+                  ax = ax3)
+### scattered landscape = dotted (initial are the same as above, so no need to add them again)
+sb.pointplot(data = sum_res15[sum_res15['restoration_type'] != 'clustered'], 
+                  y = 'B_finalsum', 
+                  hue = 'TL', 
+                  x = 'nb_improved', 
+                  palette = sb.color_palette("coolwarm", len(unique_categories)),
+                  estimator = 'mean',
+                  ax = ax3,
+                  linestyles='dotted')
+ax3.set_xlabel('Number of improved patches', fontsize=14)
+ax3.set_ylabel('Total biomass after recolonisation', fontsize=14)
+ax3.legend().remove()
+ax3.annotate('C', xy = (-0.1,1.1), verticalalignment='top', xycoords='axes fraction', fontsize='large')
+
+## Change in MEAN biomass across improvement levels from initial to 5 patches restored
+## clustered landscape
+sb.pointplot(data = sum_res15[sum_res15['restoration_type'] != 'scattered'], 
+                  y = 'B_finalmean', 
+                  hue = 'TL', 
+                  x = 'nb_improved', 
+                  palette = sb.color_palette("coolwarm", len(unique_categories)),
+                  estimator = 'mean',
+                  ax = ax6)
+sb.pointplot(data = sum_init15, 
+                  y = 'B_final_initmean', 
+                  hue = 'TL_init', 
+                  x = 'nb_improved', 
+                  palette = sb.color_palette("coolwarm", len(unique_categories)),
+                  estimator = 'mean',
+                  ax = ax6)
+## scattered landscape = dotted
+sb.pointplot(data = sum_res15[sum_res15['restoration_type'] != 'clustered'], 
+                  y = 'B_finalmean', 
+                  hue = 'TL', 
+                  x = 'nb_improved', 
+                  palette = sb.color_palette("coolwarm", len(unique_categories)),
+                  estimator = 'mean',
+                  ax = ax6,
+                  linestyles='dotted')
+ax6.set_xlabel('Number of improved patches', fontsize=14)
+ax6.set_ylabel('Mean species biomass after recolonisation', fontsize=14)
+ax6.annotate('D', xy = (-0.1,1.1), verticalalignment='top', xycoords='axes fraction', fontsize='large')
+ax6.legend().remove()
+
+
+## Change in persistence across improvement levels from initial to 5 patches restored
+sb.pointplot(data = FW15_invasion_normal[(FW15_invasion_normal['restoration_type'] != 'scattered')], 
+             y = 'persistence_int', 
+             x = 'nb_improved',
+             color = colors[2],
+             ax = ax7)
+sb.pointplot(data = FW15_init_normal, 
+             y = 'persistence_int_init', 
+             x = 'nb_improved_init',
+             color = colors[2],
+             ax = ax7)
+sb.pointplot(data = FW15_invasion_normal[(FW15_invasion_normal['stage'] != 'init') &
+                                         (FW15_invasion_normal['restoration_type'] != 'clustered')], 
+             y = 'persistence_int', 
+             x = 'nb_improved', 
+             color = colors[2],
+             ax = ax7,
+             linestyles='dotted')
+ax7.set_ylabel('Persistence of intermediate species'
+               ''
+               'after recolonisation')
+ax7.set_xlabel('Number of improved patches', fontsize=14)
+ax7.annotate('E', xy = (-0.1,1.1), verticalalignment='top', xycoords='axes fraction', fontsize='large')
+
+## Change in persistence across trophic levels 
+
+## Persistence of top species - clustered
+sb.pointplot(data = FW15_invasion_normal[(FW15_invasion_normal['stage'] != 'init') &
+                                         (FW15_invasion_normal['restoration_type'] != 'scattered')], 
+             y = 'persistence_top', 
+             x = 'nb_improved',
+             color = colors[3],
+             ax = ax8)
+sb.pointplot(data = FW15_init_normal, 
+             y = 'persistence_top_init', 
+             x = 'nb_improved_init',
+             color = colors[3],
+             ax = ax8)
+## scattered
+sb.pointplot(data = FW15_invasion_normal[(FW15_invasion_normal['stage'] != 'init') &
+                                         (FW15_invasion_normal['restoration_type'] != 'clustered')], 
+             y = 'persistence_top', 
+             x = 'nb_improved',
+             color = colors[3],
+             ax = ax8,
+             linestyles='dotted')
+ax8.set_ylabel('Persistence of top species after recolonisation', fontsize=14)
+ax8.set_xlabel('Number of improved patches', fontsize=14)
 ax8.legend().remove()
+ax8.annotate('F', xy = (-0.1,1.1), verticalalignment='top', xycoords='axes fraction', fontsize='large')
+
+# plt.savefig('D:/TheseSwansea/SFT/Figures/Figure2.pdf', dpi = 1000, bbox_inches = 'tight')
+
+# plt.savefig('D:/TheseSwansea/SFT/Figures/Figure2.png', dpi = 1000, bbox_inches = 'tight')
 
 
-plt.savefig('D:/TheseSwansea/SFT/Figures/Figure2.png', dpi = 400, bbox_inches = 'tight')
 
-
+### mean number of extinctions
+extinctions_dataframe['Count'][extinctions_dataframe['extinct']].describe()
+extinctions_dataframe[extinctions_dataframe['extinct']].groupby('TL').agg({'Count':['mean','std']})
 
 # %%%% Figure 3 - Random forests for number of recolonisers
 
@@ -1497,15 +1962,15 @@ invasions_byTL['successful_invaders_initial_pop'] = pd.Categorical(invasions_byT
 invasions_byTL = invasions_byTL.groupby(['sim','landscape_seed','restored_patches_seed',
                                          'nb_improved','patch','restoration_type','TL'], dropna = False, observed = False)['successful_invaders_initial_pop'].value_counts().reset_index(name='Count')
 
-# remove clustered simulations that were added artifically hereand that all have zero counts
+# remove clustered simulations that were added artifically here and that all have zero counts
 invasions_byTL = invasions_byTL[~((invasions_byTL['restoration_type'] == 'clustered') &
                                   (~np.isnan(invasions_byTL['restored_patches_seed'])))]
 
 
-invasions_byTL = pd.merge(invasions_byTL, FW15_init_normal, on = ['landscape_seed','sim','patch'],
-                          suffixes=['','_init'])
+invasions_byTL = pd.merge(invasions_byTL, FW15_init_normal, on = ['landscape_seed','sim','patch'])
 invasions_byTL = pd.merge(invasions_byTL, FW15_invasion_normal[['sim','nb_improved', 'landscape_seed', 'restored_patches_seed', 'patch', 'dist_invasion','dist_improved','latest_patch_improved']], 
-                          on = ['sim','nb_improved', 'landscape_seed', 'restored_patches_seed','patch'], how = 'outer')
+                          on = ['sim','nb_improved', 'landscape_seed', 'restored_patches_seed','patch'], 
+                          how = 'outer')
 
 invasions_byTL = invasions_byTL[invasions_byTL['successful_invaders_initial_pop']]
 
@@ -1518,24 +1983,81 @@ invasions_byTL = pd.merge(invasions_byTL, landscape_characteristics[['distance_c
                           left_on = ['patch','landscape_seed'],
                           right_on = ['Patch','landscape_seed'])
 
+## proportion of invasions in plants and herbivores close to source patch
 
-invasions_byTL.to_csv(f'D:/TheseSwansea/Patch-Models/outputs/15Patches/InvasionDataFrameForR.csv')
+## plants: 94% of invasions happened in the source patch 
+invasions_byTL['Count'][(invasions_byTL['TL'] == 0) & (invasions_byTL['dist_invasion'] < 0.1)].sum()/invasions_byTL['Count'][(invasions_byTL['TL'] == 0)].sum()
+## herbivores: 
+invasions_byTL['Count'][(invasions_byTL['TL'] == 1) & (invasions_byTL['dist_invasion'] < 0.1)].sum()/invasions_byTL['Count'][(invasions_byTL['TL'] == 0)].sum()
+
+# invasions_byTL.to_csv(f'D:/TheseSwansea/Patch-Models/outputs/15Patches/InvasionDataFrameForR.csv')
 
 import statsmodels.api as sm
 from statsmodels.formula.api import glm
 
 invasions_byTL['TL'] = pd.Categorical(invasions_byTL['TL'])
-formula = 'Count ~ TL*dist_improved + TL*dist_invasion'
+formula = 'Count ~ TL*dist_improved + TL*dist_invasion + TL*nb_improved + TL*degree_patch + TL*S_local_init + TL*C_local_init + TL*StdGen_local_init + TL*StdVul_local_init + TL*Modularity_local_init + TL*nb_top_local_init + TL*nb_int_local_init + TL*nb_herb_local_init + TL*nb_plants_local_init'
+
+# formula = 'Count ~ TL*C_local_init'
 model = glm(formula=formula, data=invasions_byTL, family=sm.families.Poisson()).fit()
 print(model.summary())
 
-from pymer4.models import Lmer
-formula = 'Count ~ TL*dist_improved + TL*dist_invasion + (1|landscape_seed)'
-model = Lmer(formula, data=invasions_byTL, family='poisson')
-result = model.fit()
+glm_summary = pd.DataFrame({
+    'Coefficient': model.params,
+    'Standard Error': model.bse,
+    'P-value': model.pvalues,
+    'Significance':['***' if p < 0.001 else
+                '**' if p < 0.01 else
+                '*' if p < 0.05 else
+                '' for p in model.pvalues],
+    'Confidence Interval (Lower)': model.conf_int()[0],
+    'Confidence Interval (Upper)': model.conf_int()[1]
+})
+
+# Round specific to 4 decimal places
+glm_summary[['Coefficient', 'Standard Error', 'P-value', 'Confidence Interval (Lower)', 'Confidence Interval (Upper)']] = \
+    glm_summary[['Coefficient', 'Standard Error', 'P-value', 'Confidence Interval (Lower)', 'Confidence Interval (Upper)']].round(4)
+
+clean_names = {'TL[T.1]':'Herbivores', 
+               'TL[T.2]':'Intermediate', 
+               'TL[T.3]':'Top species',
+               'dist_improved':'Dist to closest improved patch',
+               'dist_invasion':'Dist to source patch', 
+               'nb_improved': 'Nb of improved patches',
+               'degree_patch':'Euclidian distance to other patch',
+               'restoration_type_scattered':'Restoration clustering (scattered)',
+               'Modularity_local_init': 'Modularity ',
+               'S_local_init':'Species richness ', 
+               'C_local_init':'Connectance ',
+               'LS_local_init':'Nb of links per species ', 
+               'MeanGen_local_init':'Mean generality ', 
+               'StdVul_local_init':'Sd of vulnerability ',
+               'StdGen_local_init':'Sd of generality ', 
+               'MeanTP_local_init':'Mean trophic position ', 
+               'Mfcl_local_init':'Mean food chain length ', 
+               'nb_top_local_init':'Nb of top species ', 
+               'nb_int_local_init':'Nb of intermediate species ', 
+               'nb_herb_local_init':'Nb of herbivore species ', 
+               'nb_plants_local_init':'Nb of plant species '}
+
+# Function to replace based on the dictionary
+def replace_abbreviations(text, mapping):
+    for abbr, full_name in mapping.items():
+        text = text.replace(abbr, full_name)
+    return text
+
+glm_summary['CleanNames'] = glm_summary.index.to_series().apply(replace_abbreviations, args=(clean_names,))
+
+# Export the table to a CSV file
+glm_summary.to_csv('D:/TheseSwansea/SFT/outputs/glm_poisson_results.csv', index=True)
+
+# from pymer4.models import Lmer
+# formula = 'Count ~ TL*dist_improved + TL*dist_invasion + (1|landscape_seed)'
+# model = Lmer(formula, data=invasions_byTL, family='poisson')
+# result = model.fit()
 
 # Print the model summary
-print(result)
+# print(result)
 
 sb.scatterplot(invasions_byTL, x = 'C_local_init', y = 'S_local_init')
 sb.scatterplot(invasions_byTL, x = 'LS_local_init', y = 'S_local_init')
@@ -1569,24 +2091,60 @@ labels_panels = ['A','B','C','D']
 for i, TL in enumerate(TL_categories):
     X = invasions_byTL[invasions_byTL['TL'] == TL][
         [# spatial considerations
-         'dist_improved', 'dist_invasion', 'nb_improved',
-         'restoration_type_scattered',
-         'distance_center', 'degree_patch',
+         'dist_improved', 
+         'dist_invasion', 
+         'nb_improved',
+         'restoration_type_scattered', 
+         'degree_patch',
          
          ## local characteristics
-         'LS_local_init', 'S_local_init', 'C_local_init',
-         'StdGen_local_init', 'StdVul_local_init', 'MeanGen_local_init',
-         'Mfcl_local_init', 
+         'S_local_init', 
+         'C_local_init',
+         'StdGen_local_init', 
+         'StdVul_local_init', 
          'Modularity_local_init',
-         'nb_top_local_init', 'nb_int_local_init', 
-         'nb_herb_local_init', 'nb_plants_local_init'
+         'nb_top_local_init', 
+         'nb_int_local_init', 
+         'nb_herb_local_init', 
+         'nb_plants_local_init'
         ]]
     X_train, X_test, y_train, y_test = train_test_split(X, 
                                                         invasions_byTL[invasions_byTL['TL'] == TL]['Count'], test_size=0.2, random_state=42)
     
     # Initialize the Random Forest classifier
-    rf_model = RandomForestClassifier(n_estimators=100, random_state=42, max_depth = 5)  # n_estimators is the number of trees
+    rf_model = RandomForestClassifier(n_estimators=200, random_state=42, max_depth = 10)  # n_estimators is the number of trees
     
+    
+    # ## search the optimal number of trees:
+    
+    # # plotting oob (out of bag error)
+    # errors = []
+    # for i in range(10, 510, 10):
+    #     rf = RandomForestClassifier(n_estimators=i, random_state=42, max_depth = 5, oob_score=True)  # n_estimators is the number of trees
+
+    #     rf.fit(X_train, y_train)
+    #     errors.append(1 - rf.oob_score_)
+    
+    # plt.plot(range(10, 510, 10), errors)
+    # plt.xlabel('Number of Trees')
+    # plt.ylabel('OOB Error Rate')
+    # plt.show()
+    
+    # ## choose max depth and nb of trees - takes a couple minutes
+    # from sklearn.model_selection import GridSearchCV
+
+    # param_grid = {
+    #     'max_depth': [5, 10, 15, 20, 25, None],
+    #     'n_estimators': [50, 100, 200, 500]
+    # }
+    
+    # grid_search = GridSearchCV(estimator=rf_model, param_grid=param_grid, cv=5)
+    # grid_search.fit(X_train, y_train)
+    
+    # print("Best parameters:", grid_search.best_params_)
+
+
+
     # Train the model
     rf_model.fit(X_train, y_train)
     
@@ -1620,12 +2178,9 @@ for i, TL in enumerate(TL_categories):
     
     # Sort the DataFrame by importance
     feature_importances['Feature'] = feature_importances['Feature'].astype('category')
-    feature_importances['Type'] = feature_importances['Feature'].map({'dist_improved':'Nutrient input',
+    feature_importances['Type'] = feature_importances['Feature'].map({'dist_improved':'Habitat quality',
                                                                                            'dist_invasion':'Patch location', 
-                                                                                           'nb_improved': 'Nutrient input',
-                                                                                           'landscape_seed':'Landscape',
-                                                                                           'restored_patches_seed':'Landscape',
-                                                                                           'distance_center':'Patch location',
+                                                                                           'nb_improved': 'Habitat quality',
                                                                                            'degree_patch':'Patch location',
                                                                                            'restoration_type_scattered':'Landscape',
                                                                                            
@@ -1644,11 +2199,8 @@ for i, TL in enumerate(TL_categories):
                                                                                            'nb_plants_local_init':'Local food web'})
     
     feature_importances['Feature_newNames'] = feature_importances['Feature'].map({'dist_improved':'Dist to closest improved patch',
-                                                                                           'dist_invasion':'Dist to invaded patch', 
+                                                                                           'dist_invasion':'Dist to source patch', 
                                                                                            'nb_improved': 'Nb of improved patches',
-                                                                                           'landscape_seed':'Landscape configuration',
-                                                                                           'restored_patches_seed':'Restoration sequence',
-                                                                                           'distance_center':'Dist to center of the landscape',
                                                                                            'degree_patch':'Euclidian distance to other patch',
                                                                                            'restoration_type_scattered':'Restoration clustering (scattered)',
                                                                                            
@@ -1677,22 +2229,22 @@ for i, TL in enumerate(TL_categories):
     # plt.figure(figsize = (12,12))
     # for j, feature in enumerate(feature_names):
         
-    #     ax = plt.subplot(4, 5, j + 1)
+    #     ax = plt.subplot(4, 4, j + 1)
     #     plt.tight_layout(pad = 1)
     
     #     sub = invasions_byTL[invasions_byTL['TL'] == TL]
-    #     sub['Count'] = pd.Categorical(sub['Count']) # create categorical variable to get horizontal boxplot
-    #     sb.boxplot(data=sub, y='Count', 
+    #     # sub['Count'] = pd.Categorical(sub['Count']) # create categorical variable to get horizontal boxplot
+    #     sb.regplot(data=sub, y='Count', 
     #                 x=feature, ax=ax,
     #                 color='grey')    
-    #     sb.pointplot(data=sub, y='Count', 
-    #                 x=feature, ax=ax,
-    #                 color='black', linestyles='None')    
+    #     # sb.pointplot(data=sub, y='Count', 
+    #     #             x=feature, ax=ax,
+    #     #             color='black', linestyles='None')    
     #     ax.set_xlabel(feature_importances['Feature_newNames'][j])
     #     ax.set_ylabel('Nb of recolonisers')
     #     ax.set_title(f'Importance score: {np.round(importances[j],2)}')
         
-    # plt.savefig(f'D:/TheseSwansea/SFT/Figures/Effect-RF-TL{TL}.png', dpi = 400, bbox_inches = 'tight')
+    # plt.savefig(f'D:/TheseSwansea/SFT/Figures/Effect-RF-TL{TL}.png', dpi = 1000, bbox_inches = 'tight')
 
     
     
@@ -1701,7 +2253,7 @@ for i, TL in enumerate(TL_categories):
     ax = plt.subplot(2, 2, i + 1)
     plot = sb.barplot(x='Importance', y='Feature_newNames', data=feature_importances, 
                       hue='Type', palette=colors, order=feature_importances['Feature_newNames'],
-                      hue_order=['Patch location', 'Landscape', 'Nutrient input','Local food web'], ax=ax)
+                      hue_order=['Patch location', 'Landscape', 'Habitat quality','Local food web'], ax=ax)
     
     # Collect handles and labels once for the common legend
     if i == 0:
@@ -1733,7 +2285,11 @@ for i, TL in enumerate(TL_categories):
 # Adjust layout
 plt.tight_layout()
 plt.figlegend(handles, labels, bbox_to_anchor = [0.82, 1.07], title='Drivers of recolonisation', ncol = 4)
-plt.savefig('D:/TheseSwansea/SFT/Figures/RF-importance.png', dpi = 400, bbox_inches = 'tight')
+
+plt.savefig('D:/TheseSwansea/SFT/Figures/RF-importance.pdf', dpi = 1000, bbox_inches = 'tight')
+
+plt.savefig('D:/TheseSwansea/SFT/Figures/RF-importance.png', dpi = 1000, bbox_inches = 'tight')
+
 
 
 
@@ -1744,12 +2300,9 @@ plt.savefig('D:/TheseSwansea/SFT/Figures/RF-importance.png', dpi = 400, bbox_inc
 invasions_byTL_oneImprovement = invasions_byTL[invasions_byTL['nb_improved'] == 1]
 invasions_byTL_oneImprovement = pd.merge(invasions_byTL_oneImprovement,landscape_characteristics[['distance_center', 'degree_patch', 'landscape_seed','Patch']], 
                           left_on = ['latest_patch_improved','landscape_seed'],
-                          right_on = ['Patch','landscape_seed'], suffixes=['','_ImprovedPatch']
-                                         )
+                          right_on = ['Patch','landscape_seed'], suffixes=['','_ImprovedPatch'])
 
-
-
-plt.figure(figsize=(13, 8))
+plt.figure(figsize=(17, 8))
 
 # Loop through each TL category
 for i, TL in enumerate(TL_categories):
@@ -1881,7 +2434,7 @@ for i, TL in enumerate(TL_categories):
     #     ax.set_ylabel('Nb of recolonisers')
     #     ax.set_title(f'Importance score: {np.round(importances[j],2)}')
         
-    # plt.savefig(f'D:/TheseSwansea/SFT/Figures/Effect-1Improvement-RF-TL{TL}.png', dpi = 400, bbox_inches = 'tight')
+    # plt.savefig(f'D:/TheseSwansea/SFT/Figures/Effect-1Improvement-RF-TL{TL}.png', dpi = 1000, bbox_inches = 'tight')
 
     
     
@@ -1920,7 +2473,61 @@ for i, TL in enumerate(TL_categories):
 # Adjust layout
 plt.tight_layout()
 plt.figlegend(handles, labels, bbox_to_anchor = [0.68, 1.05], title='Feature Type', ncol = 3)
-# plt.savefig('D:/TheseSwansea/SFT/Figures/RF-importance.png', dpi = 400, bbox_inches = 'tight')
+plt.savefig('D:/TheseSwansea/SFT/Figures/RF-importance-OneImprovedPatch.png', dpi = 1000, bbox_inches = 'tight')
+
+
+
+
+
+import statsmodels.api as sm
+from statsmodels.formula.api import glm
+
+
+invasions_byTL_oneImprovement['TL'] = pd.Categorical(invasions_byTL_oneImprovement['TL'])
+formula = 'Count ~ TL*degree_patch_ImprovedPatch'
+model = glm(formula=formula, data=invasions_byTL_oneImprovement, family=sm.families.Poisson()).fit()
+print(model.summary())
+
+TL_categories = invasions_byTL_oneImprovement['TL'].unique()
+degree_range = np.linspace(invasions_byTL_oneImprovement['degree_patch_ImprovedPatch'].min(),
+                           invasions_byTL_oneImprovement['degree_patch_ImprovedPatch'].max(), 100)
+
+# Prepare the new data for prediction (cross product of TL categories and degree_patch_ImprovedPatch values)
+prediction_data = pd.DataFrame([(tl, degree) for tl in TL_categories for degree in degree_range], 
+                               columns=['TL', 'degree_patch_ImprovedPatch'])
+
+# Add predictions using the GLM model
+prediction_data['Count_predicted'] = model.predict(prediction_data)
+
+# Get standard errors of the predictions
+predictions_with_se = model.get_prediction(prediction_data)
+prediction_summary = predictions_with_se.summary_frame()
+
+# Add 95% confidence intervals to the prediction data
+prediction_data['ci_lower'] = prediction_summary['mean_ci_lower']
+prediction_data['ci_upper'] = prediction_summary['mean_ci_upper']
+
+# Plotting the results
+plt.figure(figsize=(8, 6))
+colors = sb.color_palette("coolwarm", len(TL_categories))
+
+# Plot each trophic level category separately
+for i, tl in enumerate(TL_categories):
+    subset = prediction_data[prediction_data['TL'] == tl]
+    # Plot the predicted values
+    plt.plot(subset['degree_patch_ImprovedPatch'], subset['Count_predicted'], label=f'{tl}', color=colors[i])
+    
+    # Plot the ribbon for 95% confidence intervals
+    plt.fill_between(subset['degree_patch_ImprovedPatch'], subset['ci_lower'], subset['ci_upper'], 
+                     color=colors[i], alpha=0.3)
+    sub = invasions_byTL_oneImprovement[invasions_byTL_oneImprovement['TL'] == tl]
+    sb.scatterplot(data = sub, x = 'degree_patch_ImprovedPatch', y = 'Count', color=colors[i])
+plt.ylabel('Number of recolonisations')
+plt.xlabel('Euclidian distance of improved patch to other patches')
+plt.legend(title = 'Trophic level')
+
+plt.savefig('D:/TheseSwansea/SFT/Figures/OnePatchImproved-Distance.png', dpi = 1000, bbox_inches = 'tight')
+
 
 
 
@@ -1955,15 +2562,18 @@ ax2.set_xlabel('Distance from closest improved patch')
 ax2.annotate('F', xy = (-0.1,1.1), verticalalignment='top', xycoords='axes fraction', fontsize='large')
 
 
-plt.savefig('D:/TheseSwansea/SFT/Figures/SupplementaryFig3.png', dpi = 400, bbox_inches = 'tight')
+plt.savefig('D:/TheseSwansea/SFT/Figures/SupplementaryFig3.png', dpi = 1000, bbox_inches = 'tight')
 
 
 
 
 # %%%% Figure 4 - Change in food web metrics - local properties
 
-fig, ([ax1, ax2, ax3], [ax4, ax5, ax6]) = plt.subplots(nrows=2, ncols=3, figsize=(12,9), sharex=True)
+fig, ([ax1, ax2, ax3], [ax4, ax5, ax6]) = plt.subplots(nrows=2, ncols=3, figsize=(15,9), sharex=True)
 fig.tight_layout(pad=3.0)
+
+sb.set(font_scale=1.5)
+sb.set_style('ticks')
 
 sb.pointplot(data = FW15_invasion_normal[FW15_invasion_normal['restoration_type'] != 'scattered'], 
               y = 'S_local', x = 'nb_improved', ax = ax1, color = 'black')
@@ -1971,6 +2581,7 @@ sb.pointplot(data = FW15_invasion_normal[FW15_invasion_normal['restoration_type'
               y = 'S_local', x = 'nb_improved', ax = ax1, color = 'grey', linestyles='dotted')
 ax1.set_ylabel('Local species richness')
 ax1.set_xlabel('Number of improved patches')
+ax1.annotate('A', xy = (-0.1,1.1), verticalalignment='top', xycoords='axes fraction', fontsize='large')
 
 sb.pointplot(data = FW15_invasion_normal[FW15_invasion_normal['restoration_type'] != 'scattered'], 
               y = 'L_local', x = 'nb_improved', ax = ax2, color = 'black')
@@ -1978,6 +2589,7 @@ sb.pointplot(data = FW15_invasion_normal[FW15_invasion_normal['restoration_type'
               y = 'L_local', x = 'nb_improved', ax = ax2, color = 'grey', linestyles='dotted')
 ax2.set_ylabel('Number of links')
 ax2.set_xlabel('Number of improved patches')
+ax2.annotate('B', xy = (-0.1,1.1), verticalalignment='top', xycoords='axes fraction', fontsize='large')
 
 sb.pointplot(data = FW15_invasion_normal[FW15_invasion_normal['restoration_type'] != 'scattered'], 
               y = 'MeanBodyMass_local', x = 'nb_improved', ax = ax3, color = 'black')
@@ -1985,6 +2597,7 @@ sb.pointplot(data = FW15_invasion_normal[FW15_invasion_normal['restoration_type'
               y = 'MeanBodyMass_local', x = 'nb_improved', ax = ax3, color = 'grey', linestyles='dotted')
 ax3.set_ylabel('Mean body mass')
 ax3.set_xlabel('Number of improved patches')
+ax3.annotate('C', xy = (-0.1,1.1), verticalalignment='top', xycoords='axes fraction', fontsize='large')
 
 sb.pointplot(data = FW15_invasion_normal[FW15_invasion_normal['restoration_type'] != 'scattered'], 
               y = 'Mfcl_local', x = 'nb_improved', ax = ax4, color = 'black')
@@ -1992,6 +2605,7 @@ sb.pointplot(data = FW15_invasion_normal[FW15_invasion_normal['restoration_type'
               y = 'Mfcl_local', x = 'nb_improved', ax = ax4, color = 'grey', linestyles='dotted')
 ax4.set_ylabel('Mean food chain length')
 ax4.set_xlabel('Number of improved patches')
+ax4.annotate('D', xy = (-0.1,1.1), verticalalignment='top', xycoords='axes fraction', fontsize='large')
 
 sb.pointplot(data = FW15_invasion_normal[FW15_invasion_normal['restoration_type'] != 'scattered'], 
               y = 'LS_local', x = 'nb_improved', ax = ax5, color = 'black')
@@ -1999,6 +2613,7 @@ sb.pointplot(data = FW15_invasion_normal[FW15_invasion_normal['restoration_type'
               y = 'LS_local', x = 'nb_improved', ax = ax5, color = 'grey', linestyles='dotted')
 ax5.set_ylabel('Number of links per species')
 ax5.set_xlabel('Number of improved patches')
+ax5.annotate('E', xy = (-0.1,1.1), verticalalignment='top', xycoords='axes fraction', fontsize='large')
 
 sb.pointplot(data = FW15_invasion_normal[FW15_invasion_normal['restoration_type'] != 'scattered'], 
               y = 'alpha_diversity_shannon', x = 'nb_improved', ax = ax6, color = 'black')
@@ -2006,12 +2621,18 @@ sb.pointplot(data = FW15_invasion_normal[FW15_invasion_normal['restoration_type'
               y = 'alpha_diversity_shannon', x = 'nb_improved', ax = ax6, color = 'grey', linestyles='dotted')
 ax6.set_ylabel('Alpha diversity (Shannon diversity)')
 ax6.set_xlabel('Number of improved patches')
+ax6.annotate('F', xy = (-0.1,1.1), verticalalignment='top', xycoords='axes fraction', fontsize='large')
 
+# plt.savefig('D:/TheseSwansea/SFT/Figures/Local-FW-Chara.pdf', dpi = 1000, bbox_inches = 'tight')
 
-plt.savefig('D:/TheseSwansea/SFT/Figures/Local-FW-Chara.png', dpi = 400, bbox_inches = 'tight')
+plt.savefig('D:/TheseSwansea/SFT/Figures/Local-FW-Chara1.png', dpi = 1000, bbox_inches = 'tight')
 
 
 # %%%% Change in food web metrics - regional properties (not in manuscript)
+
+gamma = FW15_invasion_normal.groupby(['sim','landscape_seed','restored_patches_seed','nb_improved']).agg({'S_local':'mean', 'S_regional':'mean'})
+gamma = gamma.reset_index()
+gamma['beta'] = gamma['S_regional']/gamma['S_local']
 
 fig, ([ax1, ax2], [ax3, ax4], [ax5, ax6]) = plt.subplots(nrows=3, ncols=2, figsize=(12,9), sharex=True)
 fig.tight_layout(pad=3.0)
@@ -2036,19 +2657,24 @@ sb.lineplot(data =  FW15_invasion_normal,
 ax4.set_ylabel('Modularity')
 ax4.set_xlabel('Number of improved patches')
 
-sb.lineplot(data =  FW15_invasion_normal, 
+sb.lineplot(data = FW15_invasion_normal, 
             y = 'beta_diversity_shannon', x = 'nb_improved', ax = ax5, color = 'black')
 ax5.set_ylabel('Beta diversity')
 ax5.set_xlabel('Number of improved patches')
 
-sb.lineplot(data =  FW15_invasion_normal, 
-              y = 'gamma_diversity_shannon', x = 'nb_improved', ax = ax6, color = 'black')
-ax6.set_ylabel('Gamma diversity')
+sb.lineplot(data =  gamma, 
+              y = 'beta', x = 'nb_improved', ax = ax6, color = 'black')
+ax6.set_ylabel('Beta diversity')
 ax6.set_xlabel('Number of improved patches')
 
 
-plt.savefig('D:/TheseSwansea/SFT/Figures/Regional-FW-Chara.png', dpi = 400, bbox_inches = 'tight')
+# plt.savefig('D:/TheseSwansea/SFT/Figures/Regional-FW-Chara.png', dpi = 1000, bbox_inches = 'tight')
 
+import statsmodels.formula.api as smf
+
+# Fit a linear regression model using statsmodels
+model = smf.ols('beta ~ nb_improved', data=gamma).fit()
+print(model.summary())
 
 # %%%% Traits of invaders (not in manuscript)
 
@@ -2182,7 +2808,6 @@ ax4.set_ylabel('Vulnerability')
 ax4.set_xlabel('Invasion success')
 ax4.legend().remove()
 
-plt.savefig('D:/TheseSwansea/SFT/Figures/Figure4.png', dpi = 400, bbox_inches = 'tight')
-
+plt.savefig('D:/TheseSwansea/SFT/Figures/Figure4.png', dpi = 1000, bbox_inches = 'tight')
 
 
